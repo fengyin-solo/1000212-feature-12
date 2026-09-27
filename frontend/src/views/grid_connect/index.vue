@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>并网调度管理</h2>
-        <p class="page-desc">维护调度指令，围绕指令编号、调度机构、指令内容、下发时间做登记、筛选与状态流转。</p>
+        <p class="page-desc">调度指令按待签收、执行中、待复核、已关闭流转，当前状态决定可执行动作；超期提交会带上超期标记。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记调度指令</button>
@@ -19,9 +19,16 @@
     </div>
 
     <form class="filter-bar" @submit.prevent="reload">
-      <label v-for="field in filterFields" :key="field" class="filter-item">
-        <span>{{ field }}</span>
-        <input v-model="filters[field]" :placeholder="`按${field}检索`" />
+      <label class="filter-item">
+        <span>指令编号</span>
+        <input v-model="keyword" placeholder="按指令编号检索" />
+      </label>
+      <label class="filter-item">
+        <span>指令状态</span>
+        <select v-model="statusFilter">
+          <option value="">全部状态</option>
+          <option v-for="status in statuses" :key="status" :value="status">{{ status }}</option>
+        </select>
       </label>
       <button class="btn" type="submit">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
@@ -39,7 +46,7 @@
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in rowActions(row)"
               :key="action"
               class="link"
               type="button"
@@ -47,6 +54,7 @@
             >
               {{ action }}
             </button>
+            <span v-if="!rowActions(row).length" class="muted-text">无可用动作</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -63,26 +71,40 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | boolean | string[] | null>
 
 const ENDPOINT = '/api/grid_connect'
 const columns = ["指令编号", "调度机构", "指令内容", "下发时间", "执行截止", "执行人员", "反馈情况", "指令状态"]
-const actions = ["接收指令", "确认执行", "反馈结果"]
-const statuses = ["待接收", "已接收", "已执行", "已反馈"]
-const stats = [{"label": "待执行指令", "value": 0}, {"label": "已执行指令", "value": 0}, {"label": "待反馈指令", "value": 0}]
+const statuses = ["待签收", "执行中", "待复核", "已关闭", "已撤回"]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const keyword = ref('')
+const statusFilter = ref('')
+
+const stats = computed(() => [
+  { label: '待签收指令', value: countByStatus('待签收') },
+  { label: '执行中指令', value: countByStatus('执行中') },
+  { label: '待复核指令', value: countByStatus('待复核') },
+  { label: '超期指令', value: rows.value.filter((row) => row.overdue).length },
+])
+
+function countByStatus(status: string) {
+  return rows.value.filter((row) => row.status === status).length
+}
+
+function rowActions(row: Row): string[] {
+  return Array.isArray(row.available_actions) ? row.available_actions : []
+}
 
 function resetFilters() {
-  filters.value = {}
+  keyword.value = ''
+  statusFilter.value = ''
   void reload()
 }
 
@@ -99,10 +121,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('并网调度动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message ?? payload.detail ?? '并网调度动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
@@ -112,9 +135,11 @@ async function runAction(action: string, row: Row) {
 
 async function reload() {
   errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
+  const query = new URLSearchParams()
+  if (keyword.value) query.set('keyword', keyword.value)
+  if (statusFilter.value) query.set('status', statusFilter.value)
   try {
-    const response = await request(`${ENDPOINT}?${query}`)
+    const response = await request(`${ENDPOINT}?${query.toString()}`)
     if (!response.ok) {
       throw new Error('调度指令列表读取失败')
     }
