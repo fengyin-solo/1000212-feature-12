@@ -1,4 +1,4 @@
-"""并网调度接口：维护调度指令，覆盖接收指令、确认执行、反馈结果等动作。"""
+"""并网调度接口：维护调度指令，覆盖签收、撤回、提交回执、恢复、复核完成等动作。"""
 from __future__ import annotations
 
 from typing import Any
@@ -13,13 +13,13 @@ router = APIRouter(prefix="/api/grid_connect", tags=["并网调度"])
 service = GridConnectService()
 
 LIST_FIELDS = ["指令编号", "调度机构", "指令内容", "下发时间", "执行截止", "执行人员", "反馈情况", "指令状态"]
-STATUSES = ["待接收", "已接收", "已执行", "已反馈"]
+STATUSES = ["待签收", "执行中", "待复核", "超期", "已关闭", "已撤回"]
 
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按指令编号检索"),
-    status: str | None = Query(default=None, description="待接收、已接收、已执行、已反馈"),
+    status: str | None = Query(default=None, description="待签收、执行中、待复核、超期、已关闭、已撤回"),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
@@ -50,7 +50,7 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条调度指令执行接收指令、确认执行、反馈结果；不允许的动作会被拦下并说明原因。"""
+    """对单条调度指令执行签收、撤回、提交回执、恢复、复核完成；当前状态不允许的动作会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
     entry, message = service.run_action(entry_id, action)
     if entry is None:

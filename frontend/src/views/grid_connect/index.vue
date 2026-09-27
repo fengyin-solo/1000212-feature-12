@@ -39,7 +39,7 @@
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in row.actions ?? []"
               :key="action"
               class="link"
               type="button"
@@ -47,6 +47,7 @@
             >
               {{ action }}
             </button>
+            <span v-if="!(row.actions ?? []).length">—</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -67,13 +68,12 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | null | string[]> & { actions?: string[] }
 
 const ENDPOINT = '/api/grid_connect'
 const columns = ["指令编号", "调度机构", "指令内容", "下发时间", "执行截止", "执行人员", "反馈情况", "指令状态"]
-const actions = ["接收指令", "确认执行", "反馈结果"]
-const statuses = ["待接收", "已接收", "已执行", "已反馈"]
-const stats = [{"label": "待执行指令", "value": 0}, {"label": "已执行指令", "value": 0}, {"label": "待反馈指令", "value": 0}]
+const statuses = ["待签收", "执行中", "待复核", "超期", "已关闭", "已撤回"]
+const stats = [{"label": "待签收指令", "value": 0}, {"label": "执行中指令", "value": 0}, {"label": "待复核指令", "value": 0}]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
@@ -99,10 +99,14 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
     if (!response.ok) {
       throw new Error('并网调度动作未生效，请稍后重试')
+    }
+    const result = await response.json()
+    if (!result.ok) {
+      throw new Error(result.message || '并网调度动作未生效')
     }
     await reload()
   } catch (error) {
